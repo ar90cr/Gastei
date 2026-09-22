@@ -1,16 +1,4 @@
-# Gastei
+# Gastei v2
 
-Aplicativo pessoal de controle financeiro.
-
-## Stack
-
-- Python
-- FastAPI
-- SQLAlchemy
-- SQLite
-
-## Deploy
-
-Hospedagem preparada para Render.
-
-O banco SQLite deve ficar em armazenamento persistente.
+Base estrutural do Gastei com SQLAlchemy e PostgreSQL/SQLite.
+A aplicação cria as tabelas novas sem apagar os dados existentes do MVP.
