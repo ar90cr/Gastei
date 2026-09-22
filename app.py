@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     CheckConstraint,
     UniqueConstraint,
+    Index,
     func,
     text,
     inspect,
