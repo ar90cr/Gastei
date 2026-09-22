@@ -30,13 +30,13 @@ import os
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-BASE = os.getenv("GASTEI_DATA_DIR", "/content/gastei")
+    BASE = os.getenv("GASTEI_DATA_DIR", "/content/gastei")
 os.makedirs(BASE, exist_ok=True)
 DATABASE_URL = "sqlite:///" + os.path.join(BASE, "gastei.db")
 
-Render/PostgreSQL pode fornecer DATABASE_URL com postgres://.
+#Render/PostgreSQL pode fornecer DATABASE_URL com postgres://.
 
-SQLAlchemy moderno utiliza postgresql://.
+#SQLAlchemy moderno utiliza postgresql://.
 
 if DATABASE_URL.startswith("postgres://"):
 DATABASE_URL = DATABASE_URL.replace(
