@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Text,
+    CheckConstraint,
     func,
     text,
     inspect,
