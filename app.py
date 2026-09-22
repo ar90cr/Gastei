@@ -7,7 +7,9 @@ from decimal import Decimal
 from datetime import date
 import os
 
-BASE = "/content/gastei"
+BASE = os.getenv("GASTEI_DATA_DIR", "/content/gastei")
+os.makedirs(BASE, exist_ok=True)
+
 DB = os.path.join(BASE, "gastei.db")
 
 engine = create_engine(
