@@ -426,7 +426,7 @@ def migrate_legacy_schema():
             if result is None:
                 conn.execute(text(
                     "INSERT INTO investment_institutions (name, is_active) "
-                    "VALUES ('Não informado', 1)"
+                    "VALUES ('Não informado', TRUE)"
                 ))
                 result = conn.execute(text(
                     "SELECT id FROM investment_institutions ORDER BY id LIMIT 1"
