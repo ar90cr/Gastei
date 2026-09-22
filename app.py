@@ -1221,35 +1221,71 @@ def migrate_legacy_schema():
                     )
                 )
 
-        # ----------------------------------------------------
-        # 2. INSTITUIÇÃO PADRÃO
-        # ----------------------------------------------------
+            # ====================================================
+    # 2. INSTITUIÇÃO PADRÃO
+    # ====================================================
 
-        inspector = inspect(conn)
+    inspector = inspect(conn)
 
-        if inspector.has_table(
-            "investment_institutions"
-        ):
+    if inspector.has_table("investment_institutions"):
 
+        institution_columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "investment_institutions"
+            )
+        }
+
+        # Preenche timestamps existentes que estejam NULL
+        if "created_at" in institution_columns:
             conn.execute(
                 text(
                     """
-                    INSERT INTO investment_institutions
-                        (name, is_active)
-                    SELECT
-                        :name,
-                        TRUE
-                    WHERE NOT EXISTS (
-                        SELECT 1
-                        FROM investment_institutions
-                        WHERE name = :name
-                    )
+                    UPDATE investment_institutions
+                    SET created_at = CURRENT_TIMESTAMP
+                    WHERE created_at IS NULL
                     """
-                ),
-                {
-                    "name": "Não informado"
-                },
+                )
             )
+
+        if "updated_at" in institution_columns:
+            conn.execute(
+                text(
+                    """
+                    UPDATE investment_institutions
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE updated_at IS NULL
+                    """
+                )
+            )
+
+        # Cria a instituição padrão somente se ela ainda não existir
+        conn.execute(
+            text(
+                """
+                INSERT INTO investment_institutions
+                    (
+                        name,
+                        is_active,
+                        created_at,
+                        updated_at
+                    )
+                SELECT
+                    :name,
+                    TRUE,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM investment_institutions
+                    WHERE name = :name
+                )
+                """
+            ),
+            {
+                "name": "Não informado"
+            },
+        )
 
         # ----------------------------------------------------
         # 3. VINCULA INVESTIMENTOS ANTIGOS
