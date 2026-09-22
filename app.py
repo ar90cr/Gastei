@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     CheckConstraint,
+    UniqueConstraint,
     func,
     text,
     inspect,
