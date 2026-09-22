@@ -7,15 +7,19 @@ from decimal import Decimal
 from datetime import date
 import os
 
-BASE = os.getenv("GASTEI_DATA_DIR", "/content/gastei")
-os.makedirs(BASE, exist_ok=True)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-DB = os.path.join(BASE, "gastei.db")
+if not DATABASE_URL:
+    BASE = os.getenv("GASTEI_DATA_DIR", "/content/gastei")
+    os.makedirs(BASE, exist_ok=True)
+    DB = os.path.join(BASE, "gastei.db")
 
-engine = create_engine(
-    "sqlite:///" + DB,
-    connect_args={"check_same_thread": False}
-)
+    engine = create_engine(
+        "sqlite:///" + DB,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
