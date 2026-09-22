@@ -352,7 +352,111 @@ Index("ix_crypto_prices_timestamp", CryptoPrice.timestamp)
 
 # Safe bootstrap for a fresh PostgreSQL database.
 # Existing MVP tables are preserved. New tables are added without deleting data.
+# ============================================================
+# MIGRAÇÃO COMPATÍVEL DO MVP
+# ============================================================
+# O MVP inicial já criou algumas tabelas no PostgreSQL sem as
+# colunas novas. create_all() não altera tabelas existentes.
+# Esta etapa adiciona apenas colunas ausentes e preserva dados.
+
+def migrate_legacy_schema():
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    dialect = engine.dialect.name
+
+    legacy_columns = {
+        "accounts": {
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+        "categories": {
+            "parent_id": "INTEGER",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+        "income": {
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+        "expenses": {
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+        "investments": {
+            "institution_id": "INTEGER",
+            "ticker": "VARCHAR",
+            "currency": "VARCHAR",
+            "average_price": "NUMERIC(15,2)",
+            "interest_rate": "NUMERIC(15,6)",
+            "start_date": "DATE",
+            "maturity_date": "DATE",
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
+    }
+
+    # No PostgreSQL, adicionamos somente colunas realmente ausentes.
+    # As novas colunas ficam inicialmente NULL para não quebrar os
+    # registros antigos.
+    with engine.begin() as conn:
+        for table_name, columns in legacy_columns.items():
+            if not inspector.has_table(table_name):
+                continue
+
+            existing = {c["name"] for c in inspect(engine).get_columns(table_name)}
+
+            for column_name, sql_type in columns.items():
+                if column_name not in existing:
+                    if dialect == "postgresql":
+                        conn.execute(text(
+                            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {sql_type}'
+                        ))
+                    elif dialect == "sqlite":
+                        conn.execute(text(
+                            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {sql_type}'
+                        ))
+
+        # Garante uma instituição para investimentos antigos, quando necessário.
+        if inspector.has_table("investment_institutions") and inspector.has_table("investments"):
+            result = conn.execute(text(
+                "SELECT id FROM investment_institutions ORDER BY id LIMIT 1"
+            )).first()
+
+            if result is None:
+                conn.execute(text(
+                    "INSERT INTO investment_institutions (name, is_active) "
+                    "VALUES ('Não informado', 1)"
+                ))
+                result = conn.execute(text(
+                    "SELECT id FROM investment_institutions ORDER BY id LIMIT 1"
+                )).first()
+
+            if result is not None:
+                conn.execute(text(
+                    "UPDATE investments "
+                    "SET institution_id = :institution_id "
+                    "WHERE institution_id IS NULL"
+                ), {"institution_id": result[0]})
+
+        # Preenche timestamps dos registros antigos.
+        for table_name in ("accounts", "categories", "income", "expenses", "investments"):
+            if inspector.has_table(table_name):
+                cols = {c["name"] for c in inspect(engine).get_columns(table_name)}
+                if "created_at" in cols:
+                    conn.execute(text(
+                        f'UPDATE "{table_name}" SET created_at = CURRENT_TIMESTAMP '
+                        'WHERE created_at IS NULL'
+                    ))
+                if "updated_at" in cols:
+                    conn.execute(text(
+                        f'UPDATE "{table_name}" SET updated_at = CURRENT_TIMESTAMP '
+                        'WHERE updated_at IS NULL'
+                    ))
+
+# Cria as tabelas novas e depois adapta as tabelas antigas.
 Base.metadata.create_all(engine)
+migrate_legacy_schema()
 
 db = SessionLocal()
 try:
