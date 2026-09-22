@@ -1336,6 +1336,7 @@ def migrate_legacy_schema():
             "income",
             "expenses",
             "investments",
+            "investment_institutions",
         ):
 
             inspector = inspect(conn)
