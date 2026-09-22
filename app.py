@@ -360,10 +360,16 @@ Index("ix_crypto_prices_timestamp", CryptoPrice.timestamp)
 # Esta etapa adiciona apenas colunas ausentes e preserva dados.
 
 def migrate_legacy_schema():
-    from sqlalchemy import inspect
+    """
+    Migração compatível com o MVP existente.
 
-    inspector = inspect(engine)
-    dialect = engine.dialect.name
+    - Não apaga dados.
+    - Não recria o banco.
+    - Adiciona somente colunas ausentes.
+    - Não duplica "Não informado".
+    - Vincula investimentos antigos à instituição padrão.
+    - Funciona com PostgreSQL e SQLite.
+    """
 
     legacy_columns = {
         "accounts": {
@@ -387,7 +393,7 @@ def migrate_legacy_schema():
             "institution_id": "INTEGER",
             "ticker": "VARCHAR",
             "currency": "VARCHAR",
-            "average_price": "NUMERIC(15,2)",
+            "average_price": "NUMERIC(20,8)",
             "interest_rate": "NUMERIC(15,6)",
             "start_date": "DATE",
             "maturity_date": "DATE",
@@ -396,63 +402,146 @@ def migrate_legacy_schema():
         },
     }
 
-    # No PostgreSQL, adicionamos somente colunas realmente ausentes.
-    # As novas colunas ficam inicialmente NULL para não quebrar os
-    # registros antigos.
     with engine.begin() as conn:
+
+        # ====================================================
+        # 1. ADICIONA SOMENTE COLUNAS AUSENTES
+        # ====================================================
+
         for table_name, columns in legacy_columns.items():
+
+            inspector = inspect(conn)
+
             if not inspector.has_table(table_name):
                 continue
 
-            existing = {c["name"] for c in inspect(engine).get_columns(table_name)}
+            existing_columns = {
+                column["name"]
+                for column in inspector.get_columns(table_name)
+            }
 
             for column_name, sql_type in columns.items():
-                if column_name not in existing:
-                    if dialect == "postgresql":
-                        conn.execute(text(
-                            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {sql_type}'
-                        ))
-                    elif dialect == "sqlite":
-                        conn.execute(text(
-                            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {sql_type}'
-                        ))
 
-        # Garante uma instituição para investimentos antigos, quando necessário.
-        if inspector.has_table("investment_institutions") and inspector.has_table("investments"):
-            result = conn.execute(text(
-                "SELECT id FROM investment_institutions ORDER BY id LIMIT 1"
-            )).first()
+                if column_name in existing_columns:
+                    continue
 
-            if result is None:
-                conn.execute(text(
-                    "INSERT INTO investment_institutions (name, is_active) "
-                    "VALUES ('Não informado', TRUE)"
-                ))
-                result = conn.execute(text(
-                    "SELECT id FROM investment_institutions ORDER BY id LIMIT 1"
-                )).first()
+                conn.execute(
+                    text(
+                        f'ALTER TABLE "{table_name}" '
+                        f'ADD COLUMN "{column_name}" {sql_type}'
+                    )
+                )
 
-            if result is not None:
-                conn.execute(text(
-                    "UPDATE investments "
-                    "SET institution_id = :institution_id "
-                    "WHERE institution_id IS NULL"
-                ), {"institution_id": result[0]})
+        # ====================================================
+        # 2. GARANTE "NÃO INFORMADO" SEM DUPLICAR
+        # ====================================================
 
-        # Preenche timestamps dos registros antigos.
-        for table_name in ("accounts", "categories", "income", "expenses", "investments"):
-            if inspector.has_table(table_name):
-                cols = {c["name"] for c in inspect(engine).get_columns(table_name)}
-                if "created_at" in cols:
-                    conn.execute(text(
-                        f'UPDATE "{table_name}" SET created_at = CURRENT_TIMESTAMP '
-                        'WHERE created_at IS NULL'
-                    ))
-                if "updated_at" in cols:
-                    conn.execute(text(
-                        f'UPDATE "{table_name}" SET updated_at = CURRENT_TIMESTAMP '
-                        'WHERE updated_at IS NULL'
-                    ))
+        inspector = inspect(conn)
+
+        if inspector.has_table("investment_institutions"):
+
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO investment_institutions
+                        (name, is_active)
+                    SELECT
+                        :name,
+                        TRUE
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM investment_institutions
+                        WHERE name = :name
+                    )
+                    """
+                ),
+                {
+                    "name": "Não informado"
+                },
+            )
+
+        # ====================================================
+        # 3. VINCULA INVESTIMENTOS ANTIGOS
+        # ====================================================
+
+        inspector = inspect(conn)
+
+        if (
+            inspector.has_table("investment_institutions")
+            and inspector.has_table("investments")
+        ):
+
+            investment_columns = {
+                column["name"]
+                for column in inspector.get_columns("investments")
+            }
+
+            if "institution_id" in investment_columns:
+
+                conn.execute(
+                    text(
+                        """
+                        UPDATE investments
+                        SET institution_id = (
+                            SELECT id
+                            FROM investment_institutions
+                            WHERE name = :name
+                            ORDER BY id
+                            LIMIT 1
+                        )
+                        WHERE institution_id IS NULL
+                        """
+                    ),
+                    {
+                        "name": "Não informado"
+                    },
+                )
+
+        # ====================================================
+        # 4. PREENCHE TIMESTAMPS DOS REGISTROS ANTIGOS
+        # ====================================================
+
+        for table_name in (
+            "accounts",
+            "categories",
+            "income",
+            "expenses",
+            "investments",
+        ):
+
+            inspector = inspect(conn)
+
+            if not inspector.has_table(table_name):
+                continue
+
+            columns = {
+                column["name"]
+                for column in inspector.get_columns(table_name)
+            }
+
+            if "created_at" in columns:
+
+                conn.execute(
+                    text(
+                        f'''
+                        UPDATE "{table_name}"
+                        SET created_at = CURRENT_TIMESTAMP
+                        WHERE created_at IS NULL
+                        '''
+                    )
+                )
+
+            if "updated_at" in columns:
+
+                conn.execute(
+                    text(
+                        f'''
+                        UPDATE "{table_name}"
+                        SET updated_at = CURRENT_TIMESTAMP
+                        WHERE updated_at IS NULL
+                        '''
+                    )
+                )
 
 # Cria as tabelas novas e depois adapta as tabelas antigas.
 Base.metadata.create_all(engine)
