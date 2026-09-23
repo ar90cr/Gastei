@@ -1189,13 +1189,17 @@ def migrate_legacy_schema():
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         },
+        "investment_institutions": {
+            "created_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP",
+        },
     }
 
     with engine.begin() as conn:
 
-        # ----------------------------------------------------
-        # 1. ADICIONA COLUNAS AUSENTES
-        # ----------------------------------------------------
+        # -------------------------------------------------
+        # 1. Adiciona colunas que estejam faltando
+        # -------------------------------------------------
 
         for table_name, columns in legacy_columns.items():
 
@@ -1209,100 +1213,129 @@ def migrate_legacy_schema():
                 for column in inspector.get_columns(table_name)
             }
 
-            for column_name, sql_type in columns.items():
+            for column_name, column_type in columns.items():
 
                 if column_name in existing_columns:
                     continue
 
                 conn.execute(
                     text(
-                        f'ALTER TABLE "{table_name}" '
-                        f'ADD COLUMN "{column_name}" {sql_type}'
+                        f"""
+                        ALTER TABLE {table_name}
+                        ADD COLUMN {column_name} {column_type}
+                        """
                     )
                 )
 
-            # ====================================================
-    # 2. INSTITUIÇÃO PADRÃO
-    # ====================================================
-
-    inspector = inspect(conn)
-
-    if inspector.has_table("investment_institutions"):
-
-        institution_columns = {
-            column["name"]
-            for column in inspector.get_columns(
-                "investment_institutions"
-            )
-        }
-
-        # Preenche timestamps existentes que estejam NULL
-        if "created_at" in institution_columns:
-            conn.execute(
-                text(
-                    """
-                    UPDATE investment_institutions
-                    SET created_at = CURRENT_TIMESTAMP
-                    WHERE created_at IS NULL
-                    """
-                )
-            )
-
-        if "updated_at" in institution_columns:
-            conn.execute(
-                text(
-                    """
-                    UPDATE investment_institutions
-                    SET updated_at = CURRENT_TIMESTAMP
-                    WHERE updated_at IS NULL
-                    """
-                )
-            )
-
-        # Cria a instituição padrão somente se ela ainda não existir
-        conn.execute(
-            text(
-                """
-                INSERT INTO investment_institutions
-                    (
-                        name,
-                        is_active,
-                        created_at,
-                        updated_at
-                    )
-                SELECT
-                    :name,
-                    TRUE,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM investment_institutions
-                    WHERE name = :name
-                )
-                """
-            ),
-            {
-                "name": "Não informado"
-            },
-        )
-
-        # ----------------------------------------------------
-        # 3. VINCULA INVESTIMENTOS ANTIGOS
-        # ----------------------------------------------------
+        # -------------------------------------------------
+        # 2. Atualiza o inspector depois das alterações
+        # -------------------------------------------------
 
         inspector = inspect(conn)
 
-        if (
-            inspector.has_table("investment_institutions")
-            and inspector.has_table("investments")
-        ):
+        # -------------------------------------------------
+        # 3. Instituição padrão
+        # -------------------------------------------------
 
-            investment_columns = {
+        if inspector.has_table("investment_institutions"):
+
+            institution_columns = {
                 column["name"]
                 for column in inspector.get_columns(
-                    "investments"
+                    "investment_institutions"
                 )
+            }
+
+            # Corrige registros antigos que tenham
+            # created_at ou updated_at nulos.
+            if "created_at" in institution_columns:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE investment_institutions
+                        SET created_at = CURRENT_TIMESTAMP
+                        WHERE created_at IS NULL
+                        """
+                    )
+                )
+
+            if "updated_at" in institution_columns:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE investment_institutions
+                        SET updated_at = CURRENT_TIMESTAMP
+                        WHERE updated_at IS NULL
+                        """
+                    )
+                )
+
+            # Cria a instituição padrão somente se não existir.
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO investment_institutions
+                        (
+                            name,
+                            is_active,
+                            created_at,
+                            updated_at
+                        )
+                    SELECT
+                        :name,
+                        TRUE,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM investment_institutions
+                        WHERE name = :name
+                    )
+                    """
+                ),
+                {
+                    "name": "Não informado"
+                },
+            )
+
+        # -------------------------------------------------
+        # 4. Descobre o ID da instituição padrão
+        # -------------------------------------------------
+
+        default_institution_id = None
+
+        if inspector.has_table("investment_institutions"):
+
+            result = conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM investment_institutions
+                    WHERE name = :name
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "name": "Não informado"
+                },
+            )
+
+            row = result.fetchone()
+
+            if row:
+                default_institution_id = row[0]
+
+        # -------------------------------------------------
+        # 5. Vincula investimentos antigos
+        # -------------------------------------------------
+
+        if (
+            default_institution_id is not None
+            and inspector.has_table("investments")
+        ):
+            investment_columns = {
+                column["name"]
+                for column in inspector.get_columns("investments")
             }
 
             if "institution_id" in investment_columns:
@@ -1311,67 +1344,59 @@ def migrate_legacy_schema():
                     text(
                         """
                         UPDATE investments
-                        SET institution_id = (
-                            SELECT id
-                            FROM investment_institutions
-                            WHERE name = :name
-                            ORDER BY id
-                            LIMIT 1
-                        )
+                        SET institution_id = :institution_id
                         WHERE institution_id IS NULL
                         """
                     ),
                     {
-                        "name": "Não informado"
+                        "institution_id": default_institution_id
                     },
                 )
 
-        # ----------------------------------------------------
-        # 4. PREENCHE TIMESTAMPS ANTIGOS
-        # ----------------------------------------------------
+        # -------------------------------------------------
+        # 6. Preenche timestamps das tabelas antigas
+        # -------------------------------------------------
 
-        for table_name in (
+        timestamp_tables = (
             "accounts",
             "categories",
             "income",
             "expenses",
             "investments",
             "investment_institutions",
-        ):
+        )
 
-            inspector = inspect(conn)
+        for table_name in timestamp_tables:
 
             if not inspector.has_table(table_name):
                 continue
 
-            columns = {
+            table_columns = {
                 column["name"]
-                for column in inspector.get_columns(
-                    table_name
-                )
+                for column in inspector.get_columns(table_name)
             }
 
-            if "created_at" in columns:
+            if "created_at" in table_columns:
 
                 conn.execute(
                     text(
-                        f'''
-                        UPDATE "{table_name}"
+                        f"""
+                        UPDATE {table_name}
                         SET created_at = CURRENT_TIMESTAMP
                         WHERE created_at IS NULL
-                        '''
+                        """
                     )
                 )
 
-            if "updated_at" in columns:
+            if "updated_at" in table_columns:
 
                 conn.execute(
                     text(
-                        f'''
-                        UPDATE "{table_name}"
+                        f"""
+                        UPDATE {table_name}
                         SET updated_at = CURRENT_TIMESTAMP
                         WHERE updated_at IS NULL
-                        '''
+                        """
                     )
                 )
 
