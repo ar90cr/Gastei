@@ -33,13 +33,19 @@ if not DATABASE_URL:
     os.makedirs(BASE, exist_ok=True)
     DATABASE_URL = "sqlite:///" + os.path.join(BASE, "gastei.db")
 
-# Render/PostgreSQL pode fornecer DATABASE_URL com postgres://.
-# SQLAlchemy moderno utiliza postgresql://.
-
+# Render pode fornecer DATABASE_URL como postgres:// ou postgresql://.
+# Fixamos explicitamente o driver psycopg2, pois o projeto usa
+# psycopg2-binary e não o pacote psycopg (v3).
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
+        "postgresql+psycopg2://",
+        1,
+    )
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
         "postgresql://",
+        "postgresql+psycopg2://",
         1,
     )
 
