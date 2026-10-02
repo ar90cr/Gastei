@@ -1,8 +1,24 @@
-# Gastei v2
+# Gastei
 
-Base estrutural do Gastei com SQLAlchemy e PostgreSQL/SQLite.
-A aplicação cria as tabelas novas sem apagar os dados existentes do MVP.
+Aplicação web pessoal de finanças, mobile-first e compatível com PWA.
 
+## V2 funcional
 
-## Migração
-A inicialização faz uma migração compatível das tabelas do MVP para preservar dados existentes.
+- Dashboard financeiro
+- Receitas e despesas
+- Transferências entre contas
+- Cartões, compras e parcelamentos
+- Investimentos
+- Metas financeiras
+- Saúde financeira
+- Programas e regras de recompensas
+- Automóveis e manutenção
+- Exportação JSON
+- PWA com manifest e service worker
+- PostgreSQL no Render e SQLite como fallback local
+
+## Deploy
+
+O projeto usa Docker/Uvicorn. No Render, mantenha o PostgreSQL existente e a variável `DATABASE_URL` configurada.
+
+Não é necessário recriar o banco para instalar esta versão.
